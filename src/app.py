@@ -4,12 +4,15 @@ import pandas as pd
 import streamlit as st
 
 st.set_page_config(
-    page_title="DAESG Technical Companion PoC", page_icon="🛡️", layout="wide"
+    page_title="DAESG Technical Companion & Telemetry Sandbox",
+    page_icon="🛡️",
+    layout="wide",
 )
 
-st.title("🛡️ DAESG Technical Companion PoC")
+st.title("DAESG Technical Companion & Telemetry Sandbox")
 st.markdown(
-    "Data and Attention ESG Framework: Telemetry, Stratified Sampling, and Compliance Audit."
+    "Use this interface to execute evaluations, record telemetry data, and feed"
+    " your financial reconciliation pipeline."
 )
 
 # Ensure data directory exists
@@ -33,101 +36,77 @@ def load_audit_logs():
   return logs
 
 
-# Helper function to save a single record
+# Helper function to save a record
 def save_log_record(record):
   with open(LOG_FILE, "a") as f:
     f.write(json.dumps(record) + "\n")
 
 
-# Sidebar Controls for Data Management (Restored with Account and Client fields)
-st.sidebar.header("⚙️ Data Management & Testing")
+# 1. Main Telemetry Execution Form (with added Client Name and Account ID fields)
+with st.form("telemetry_form"):
+  col_a, col_b = st.columns(2)
+  with col_a:
+    client_name = st.text_input("Client Name", "Client_Alpha")
+  with col_b:
+    account_id = st.text_input("Account ID", "Acc_001")
 
-with st.sidebar.expander("➕ Add Manual Transaction"):
-  with st.form("manual_entry_form"):
-    m_client = st.text_input("Client ID / Name", "Client_Alpha")
-    m_account = st.text_input("Account ID", "Acc_001")
-    m_session = st.text_input("Session ID", "daesg_session_01")
-    m_unit = st.selectbox("Unit Type", ["tokens", "requests", "seconds"])
-    m_count = st.number_input("Count / Volume", min_value=1, value=1000)
-    m_prompt_len = st.number_input("Prompt Length", min_value=1, value=100)
-    m_duration = st.number_input(
-        "Duration (Seconds)", min_value=0.1, value=1.5
+  session_id = st.text_input("Session ID", "daesg_session_01")
+  unit_type = st.selectbox("Unit Type", ["tokens", "requests", "seconds"])
+
+  col1, col2, col3 = st.columns(3)
+  with col1:
+    count_val = st.number_input("Consumption Count", min_value=1, value=1500)
+  with col2:
+    prompt_len = st.number_input("Prompt Length (Chars)", min_value=1, value=120)
+  with col3:
+    duration_val = st.number_input(
+        "Duration (Seconds)", min_value=0.1, value=2.5
     )
-    m_submitted = st.form_submit_button("Record Transaction")
 
-    if m_submitted:
-      import datetime
+  submitted = st.form_submit_button("Record Telemetry & Simulate Run")
 
-      new_record = {
-          "timestamp": datetime.datetime.now().isoformat(),
-          "client_id": m_client,
-          "account_id": m_account,
-          "session_id": m_session,
-          "unit_type": m_unit,
-          "count": m_count,
-          "prompt_length": m_prompt_len,
-          "duration_seconds": m_duration,
-      }
-      save_log_record(new_record)
-      st.success("Manual transaction logged successfully!")
-      st.rerun()
+  if submitted:
+    import datetime
 
-# Sidebar Bulk Import
-with st.sidebar.expander("📥 Bulk Import (Template)"):
-  uploaded_file = st.file_uploader(
-      "Upload Excel or CSV batch file", type=["xlsx", "csv"]
-  )
-  if uploaded_file is not None:
-    if uploaded_file.name.endswith(".xlsx"):
-      bulk_df = pd.read_excel(uploaded_file)
-    else:
-      bulk_df = pd.read_csv(uploaded_file)
+    new_record = {
+        "timestamp": datetime.datetime.now().isoformat(),
+        "client_name": client_name,
+        "account_id": account_id,
+        "session_id": session_id,
+        "unit_type": unit_type,
+        "count": count_val,
+        "prompt_length": prompt_len,
+        "duration_seconds": duration_val,
+    }
+    save_log_record(new_record)
+    st.success("Telemetry recorded successfully!")
+    st.rerun()
 
-    st.write(f"Rows detected: {len(bulk_df)}")
-    if st.button("Confirm Bulk Append"):
-      with open(LOG_FILE, "a") as f:
-        for _, row in bulk_df.iterrows():
-          f.write(json.dumps(row.to_dict()) + "\n")
-      st.success(f"Successfully imported {len(bulk_df)} records!")
-      st.rerun()
+st.markdown("---")
+st.markdown("### Current Stored Audit Logs")
 
-# Load current logs
 logs_data = load_audit_logs()
-
-# Main Dashboard View
-st.markdown("### 📊 Live Telemetry & Sampling Validation Dashboard")
 
 if logs_data:
   df_logs = pd.DataFrame(logs_data)
+  st.dataframe(df_logs, use_container_width=True)
 
-  col1, col2, col3 = st.columns(3)
-  col1.metric("Total Records", len(df_logs))
-  col2.metric(
-      "Unique Accounts",
-      df_logs["account_id"].nunique() if "account_id" in df_logs.columns else 0,
-  )
-  col3.metric(
-      "Unique Sessions",
-      df_logs["session_id"].nunique() if "session_id" in df_logs.columns else 0,
-  )
+  # Action Controls: Mass Upload, Delete All, and Excel Export
+  st.markdown("### 🛠️ Batch Controls & Reporting")
+  action_col1, action_col2, action_col3 = st.columns(3)
 
-  # 🛠️ Batch Data Controls placed right between metrics/controls and the data table preview
-  st.markdown("---")
-  st.markdown("### 🛠️ Batch Data Controls")
-  ctrl_col1, ctrl_col2 = st.columns(2)
-
-  with ctrl_col1:
-    if st.button("🗑️ Delete All Records (Clear Log)", use_container_width=True):
+  with action_col1:
+    if st.button("🗑️ Delete All Logs", use_container_width=True):
       if os.path.exists(LOG_FILE):
         os.remove(LOG_FILE)
-        st.success("All logs cleared successfully!")
+        st.success("All logs cleared!")
         st.rerun()
 
-  with ctrl_col2:
-    with st.popover("📤 Mass Upload Template File", use_container_width=True):
-      st.markdown("### Upload Mass Dataset")
+  with action_col2:
+    with st.popover("📤 Mass Upload Template", use_container_width=True):
+      st.markdown("### Upload Batch Dataset")
       mass_file = st.file_uploader(
-          "Choose Excel or CSV file", type=["xlsx", "csv"], key="mass_popover"
+          "Choose Excel or CSV", type=["xlsx", "csv"], key="mass_file_main"
       )
       if mass_file is not None:
         if mass_file.name.endswith(".xlsx"):
@@ -135,46 +114,50 @@ if logs_data:
         else:
           mass_df = pd.read_csv(mass_file)
         st.write(f"Loaded {len(mass_df)} rows.")
-        if st.button("Commit Mass Upload"):
+        if st.button("Confirm Mass Ingestion"):
           with open(LOG_FILE, "a") as f:
             for _, row in mass_df.iterrows():
               f.write(json.dumps(row.to_dict()) + "\n")
-          st.success(
-              f"Successfully mass-uploaded {len(mass_df)} records!"
-          )
+          st.success(f"Successfully imported {len(mass_df)} records!")
           st.rerun()
 
-  st.markdown("---")
-  st.markdown("#### Stored Audit Records Preview")
-  st.dataframe(df_logs, use_container_width=True)
+  with action_col3:
+    # Placeholder or trigger for your multi-tab Excel export logic
+    import io
 
-  st.info(
-      "💡 Ready to validate: The aggregate totals flow to billing, while your"
-      " 1% global sample and 0.5% per-account cap apply automatically for"
-      " reporting."
-  )
-else:
-  st.warning(
-      "No audit data found. Use the sidebar to add manual transactions or use"
-      " the mass upload control below!"
-  )
+    output = io.BytesIO()
+    with pd.ExcelWriter(output, engine="xlsxwriter") as writer:
+      df_logs.to_excel(writer, sheet_name="Full_Telemetry", index=False)
+    processed_data = output.getvalue()
 
-  st.markdown("---")
-  st.markdown("### 🛠️ Batch Data Controls")
-  with st.popover("📤 Mass Upload Template File", use_container_width=True):
-    st.markdown("### Upload Mass Dataset")
-    mass_file = st.file_uploader(
-        "Choose Excel or CSV file", type=["xlsx", "csv"], key="mass_popover_empty"
+    st.download_button(
+        label="📥 Export Excel Report",
+        data=processed_data,
+        file_name="daesg_audit_report.xlsx",
+        mime=(
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        ),
+        use_container_width=True,
     )
-    if mass_file is not None:
-      if mass_file.name.endswith(".xlsx"):
-        mass_df = pd.read_excel(mass_file)
+
+else:
+  st.info("No audit logs found. Run an interaction above to generate telemetry data.")
+  
+  # Allow mass upload even when empty so user can seed their 1000 records
+  st.markdown("---")
+  with st.expander("📤 Mass Upload Template (Empty State)"):
+    mass_file_empty = st.file_uploader(
+        "Choose Excel or CSV batch file", type=["xlsx", "csv"], key="mass_empty"
+    )
+    if mass_file_empty is not None:
+      if mass_file_empty.name.endswith(".xlsx"):
+        mass_df = pd.read_excel(mass_file_empty)
       else:
-        mass_df = pd.read_csv(mass_file)
+        mass_df = pd.read_csv(mass_file_empty)
       st.write(f"Loaded {len(mass_df)} rows.")
-      if st.button("Commit Mass Upload"):
+      if st.button("Confirm Mass Ingestion"):
         with open(LOG_FILE, "a") as f:
           for _, row in mass_df.iterrows():
             f.write(json.dumps(row.to_dict()) + "\n")
-        st.success(f"Successfully mass-uploaded {len(mass_df)} records!")
+        st.success(f"Successfully imported {len(mass_df)} records!")
         st.rerun()
