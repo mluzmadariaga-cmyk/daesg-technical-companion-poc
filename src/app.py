@@ -34,6 +34,22 @@ def load_audit_logs():
                         continue
     return logs
 
+# Helper function to check if session_id already exists
+def session_exists(session_id_to_check):
+    if not os.path.exists(LOG_FILE):
+        return False
+    with open(LOG_FILE, "r") as f:
+        for line in f:
+            line = line.strip()
+            if line:
+                try:
+                    record = json.loads(line)
+                    if record.get("session_id") == session_id_to_check:
+                        return True
+                except json.JSONDecodeError:
+                    continue
+    return False
+
 # Helper function to save a record
 def save_log_record(record):
     with open(LOG_FILE, "a") as f:
@@ -61,20 +77,23 @@ with st.form("telemetry_form"):
     submitted = st.form_submit_button("Record Telemetry & Simulate Run")
 
     if submitted:
-        import datetime
-        new_record = {
-            "timestamp": datetime.datetime.now().isoformat(),
-            "client_name": client_name,
-            "account_id": account_id,
-            "session_id": session_id,
-            "unit_type": unit_type,
-            "count": count_val,
-            "prompt_size_kb": prompt_size_kb,
-            "duration_seconds": duration_val
-        }
-        save_log_record(new_record)
-        st.success("Telemetry recorded successfully!")
-        st.rerun()
+        if session_exists(session_id.strip()):
+            st.error(f"Duplicate Session ID '{session_id}' detected! Each session ID must be unique to maintain audit integrity.")
+        else:
+            import datetime
+            new_record = {
+                "timestamp": datetime.datetime.now().isoformat(),
+                "client_name": client_name,
+                "account_id": account_id,
+                "session_id": session_id.strip(),
+                "unit_type": unit_type,
+                "count": count_val,
+                "prompt_size_kb": prompt_size_kb,
+                "duration_seconds": duration_val
+            }
+            save_log_record(new_record)
+            st.success("Telemetry recorded successfully!")
+            st.rerun()
 
 st.markdown("---")
 st.markdown("### Current Stored Audit Logs")
@@ -108,11 +127,22 @@ if logs_data:
                     mass_df = pd.read_csv(mass_file)
                 st.write(f"Loaded {len(mass_df)} rows.")
                 if st.button("Confirm Mass Ingestion"):
-                    with open(LOG_FILE, "a") as f:
-                        for _, row in mass_df.iterrows():
-                            f.write(json.dumps(row.to_dict()) + "\n")
-                    st.success(f"Successfully imported {len(mass_df)} records!")
-                    st.rerun()
+                    # Check for duplicate session IDs in batch vs existing logs
+                    existing_sessions = {r["session_id"] for r in logs_data}
+                    duplicate_found = False
+                    for _, row in mass_df.iterrows():
+                        if str(row.get("session_id")) in existing_sessions:
+                            duplicate_found = True
+                            break
+                    
+                    if duplicate_found:
+                        st.error("Batch upload contains duplicate Session IDs already present in audit logs. Ingestion aborted.")
+                    else:
+                        with open(LOG_FILE, "a") as f:
+                            for _, row in mass_df.iterrows():
+                                f.write(json.dumps(row.to_dict()) + "\n")
+                        st.success(f"Successfully imported {len(mass_df)} records!")
+                        st.rerun()
 
     with col_btn3:
         template_output = io.BytesIO()
@@ -149,7 +179,7 @@ if logs_data:
             usage_df = df_logs[usage_cols] if usage_cols else df_logs
             usage_df.to_excel(writer, sheet_name="UsageTokensTime", index=False)
             
-            # Sheet 3: SamplingData (Strictly unlinked - Account ID & Client Name excluded)
+            # Sheet 3: SamplingData (Strictly unlinked - Account ID & Client Name excluded, using prompt_size_kb)
             try:
                 if "account_id" in df_logs.columns and len(df_logs) > 0:
                     def safe_sample(group):
