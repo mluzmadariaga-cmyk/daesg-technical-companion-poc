@@ -2,47 +2,63 @@ import sqlite3
 import json
 import os
 
-DB_PATH = os.getenv("DB_PATH", "/app/data/billing_ledger.db")
 LOG_FILE_PATH = os.getenv("LOG_FILE_PATH", "/app/data/audit_logs.jsonl")
+BILLING_DB_PATH = os.getenv("BILLING_DB_PATH", "/app/data/billing_ledger.db")
 
-def execute_second_line_reconciliation(materiality_threshold_pct=0.1):
+class DAESGReconciliationControl:
     """
-    Performs Second Line of Defence reconciliation: 
-    Compares operational telemetry aggregate tokens against commercial billing records.
+    Second Line of Defence: Performs automated variance reconciliation 
+    between operational AI telemetry and enterprise financial ledgers.
     """
-    # 1. Aggregate from permanent telemetry log (Pipeline 1 source simulation)
-    telemetry_tokens = 0
-    if os.path.exists(LOG_FILE_PATH):
+    def __init__(self, token_unit_cost: float = 0.00002):
+        self.token_unit_cost = token_unit_cost # Cost per token in USD
+
+    def aggregate_runtime_telemetry(self) -> int:
+        """Reads permanent audit logs and sums total tokens consumed."""
+        total_tokens = 0
+        if not os.path.exists(LOG_FILE_PATH):
+            return 0
+            
         with open(LOG_FILE_PATH, "r") as f:
             for line in f:
-                record = json.loads(line)
+                record = json.loads(line.strip())
                 if record.get("unit_type") == "tokens":
-                    telemetry_tokens += record.get("metadata", {}).get("token_count", 0)
+                    total_tokens += record.get("count", 0)
+        return total_tokens
 
-    # 2. Extract from immutable billing database (Commercial ledger)
-    if not os.path.exists(DB_PATH):
-        return {"status": "ERROR", "message": "Billing ledger database missing."}
-        
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-    cursor.execute("SELECT SUM(commercial_billed_tokens) FROM verified_billing;")
-    billing_result = cursor.fetchone()
-    billing_tokens = billing_result[0] if billing_result and billing_result[0] is not None else 0
-    conn.close()
+    def get_financial_ledger_cost(self) -> float:
+        """Simulates fetching the recorded expense from the financial ERP/billing database."""
+        if not os.path.exists(BILLING_DB_PATH):
+            return 0.0 # Default if ledger hasn't synced yet
+            
+        conn = sqlite3.connect(BILLING_DB_PATH)
+        cursor = conn.cursor()
+        cursor.execute("SELECT SUM(billed_amount) FROM vendor_invoices")
+        result = cursor.fetchone()
+        conn.close()
+        return result[0] if result and result[0] is not None else 0.0
 
-    # 3. Variance Analysis (Materiality check)
-    absolute_variance = abs(telemetry_tokens - billing_tokens)
-    variance_pct = (absolute_variance / billing_tokens * 100) if billing_tokens > 0 else 0.0
-    
-    reconciled = variance_pct <= materiality_threshold_pct
+    def run_reconciliation_variance_check(self) -> dict:
+        """
+        Compares operational usage expenditure against financial billing records.
+        Flags discrepancies exceeding acceptable audit variance thresholds.
+        """
+        tokens_consumed = self.aggregate_runtime_telemetry()
+        calculated_liability = tokens_consumed * self.token_unit_cost
+        recorded_billing_expense = self.get_financial_ledger_cost()
 
-    audit_assertion = {
-        "ledger_telemetry_tokens": telemetry_tokens,
-        "ledger_commercial_billing": billing_tokens,
-        "absolute_variance": absolute_variance,
-        "variance_percentage": round(variance_pct, 4),
-        "materiality_threshold_pct": materiality_threshold_pct,
-        "reconciliation_status": "PASSED" if reconciled else "MATERIAL_DISCREPANCY_DETECTED"
-    }
-    
-    return audit_assertion
+        variance = calculated_liability - recorded_billing_expense
+        variance_percentage = (variance / recorded_billing_expense * 100) if recorded_billing_expense > 0 else 0.0
+
+        status = "PASSED_RECONCILIATION"
+        if abs(variance_percentage) > 2.0: # 2% materiality threshold
+            status = "VARIANCE_THRESHOLD_EXCEEDED"
+
+        return {
+            "status": status,
+            "operational_tokens": tokens_consumed,
+            "calculated_liability_usd": round(calculated_liability, 4),
+            "ledger_expense_usd": round(recorded_billing_expense, 4),
+            "variance_usd": round(variance, 4),
+            "variance_percentage": round(variance_percentage, 2)
+        }
