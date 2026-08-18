@@ -173,20 +173,24 @@ if logs_data:
             billing_df = df_logs[billing_cols] if billing_cols else df_logs
             billing_df.to_excel(writer, sheet_name="BillingData", index=False)
             
-            # Sheet 2: UsageTokensTime (Raw session telemetry with prompt_size_kb)
-            usage_cols = [c for c in ["timestamp", "client_name", "account_id", "session_id", "unit_type", "count", "prompt_size_kb", "duration_seconds"] if c in df_logs.columns]
-            usage_df = df_logs[usage_cols] if usage_cols else df_logs
-            usage_df.to_excel(writer, sheet_name="UsageTokensTime", index=False)
+            # Sheet 2: UsageTokensTime (Pure anonymized aggregate totals only: Tokens, Prompt KB, Duration)
+            usage_agg_df = pd.DataFrame([{
+                "total_tokens": df_logs["count"].sum() if "count" in df_logs.columns else 0,
+                "total_prompt_size_kb": df_logs["prompt_size_kb"].sum() if "prompt_size_kb" in df_logs.columns else 0.0,
+                "total_duration_seconds": df_logs["duration_seconds"].sum() if "duration_seconds" in df_logs.columns else 0.0,
+                "total_sessions": len(df_logs)
+            }])
+            usage_agg_df.to_excel(writer, sheet_name="UsageTokensTime", index=False)
             
-            # Sheet 3: PeriodAggregation (Enterprise-scale rolled-up totals by date/account)
+            # Sheet 3: PeriodAggregation (Pure privacy-preserving totals aggregated by date without any identifiers)
             if "timestamp" in df_logs.columns:
                 df_logs["date"] = pd.to_datetime(df_logs["timestamp"]).dt.date
-                period_agg_df = df_logs.groupby(["date", "client_name", "account_id", "unit_type"]).agg({
+                period_agg_df = df_logs.groupby("date").agg({
                     "count": "sum",
                     "prompt_size_kb": "sum",
                     "duration_seconds": "sum",
                     "session_id": "count"
-                }).rename(columns={"session_id": "total_sessions"}).reset_index()
+                }).rename(columns={"count": "total_tokens", "session_id": "total_sessions"}).reset_index()
                 period_agg_df.to_excel(writer, sheet_name="PeriodAggregation", index=False)
             
             # Sheet 4: SamplingData (Strictly unlinked - Account ID & Client Name excluded, using prompt_size_kb)
