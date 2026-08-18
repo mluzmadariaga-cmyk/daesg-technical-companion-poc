@@ -127,7 +127,6 @@ if logs_data:
                     mass_df = pd.read_csv(mass_file)
                 st.write(f"Loaded {len(mass_df)} rows.")
                 if st.button("Confirm Mass Ingestion"):
-                    # Check for duplicate session IDs in batch vs existing logs
                     existing_sessions = {r["session_id"] for r in logs_data}
                     duplicate_found = False
                     for _, row in mass_df.iterrows():
@@ -169,17 +168,28 @@ if logs_data:
     with col_btn4:
         output = io.BytesIO()
         with pd.ExcelWriter(output, engine="openpyxl") as writer:
-            # Sheet 1: BillingData (Retaining Client Name & Account ID for financial reconciliation)
+            # Sheet 1: BillingData (Client & Account traceability for financial reconciliation)
             billing_cols = [c for c in ["client_name", "account_id", "session_id", "unit_type", "count"] if c in df_logs.columns]
             billing_df = df_logs[billing_cols] if billing_cols else df_logs
             billing_df.to_excel(writer, sheet_name="BillingData", index=False)
             
-            # Sheet 2: UsageTokensTime (Aggregate usage telemetry with prompt_size_kb)
-            usage_cols = [c for c in ["timestamp", "session_id", "unit_type", "count", "prompt_size_kb", "duration_seconds"] if c in df_logs.columns]
+            # Sheet 2: UsageTokensTime (Raw session telemetry with prompt_size_kb)
+            usage_cols = [c for c in ["timestamp", "client_name", "account_id", "session_id", "unit_type", "count", "prompt_size_kb", "duration_seconds"] if c in df_logs.columns]
             usage_df = df_logs[usage_cols] if usage_cols else df_logs
             usage_df.to_excel(writer, sheet_name="UsageTokensTime", index=False)
             
-            # Sheet 3: SamplingData (Strictly unlinked - Account ID & Client Name excluded, using prompt_size_kb)
+            # Sheet 3: PeriodAggregation (Enterprise-scale rolled-up totals by date/account)
+            if "timestamp" in df_logs.columns:
+                df_logs["date"] = pd.to_datetime(df_logs["timestamp"]).dt.date
+                period_agg_df = df_logs.groupby(["date", "client_name", "account_id", "unit_type"]).agg({
+                    "count": "sum",
+                    "prompt_size_kb": "sum",
+                    "duration_seconds": "sum",
+                    "session_id": "count"
+                }).rename(columns={"session_id": "total_sessions"}).reset_index()
+                period_agg_df.to_excel(writer, sheet_name="PeriodAggregation", index=False)
+            
+            # Sheet 4: SamplingData (Strictly unlinked - Account ID & Client Name excluded, using prompt_size_kb)
             try:
                 if "account_id" in df_logs.columns and len(df_logs) > 0:
                     def safe_sample(group):
