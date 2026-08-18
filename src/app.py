@@ -52,11 +52,11 @@ with st.form("telemetry_form"):
 
     col1, col2, col3 = st.columns(3)
     with col1:
-        count_val = st.number_input("Consumption Count", min_value=1, value=1500)
+        count_val = st.number_input("Consumption Count (Tokens)", min_value=1, value=1500)
     with col2:
-        prompt_len = st.number_input("Prompt Length (Chars)", min_value=1, value=120)
+        prompt_size_kb = st.number_input("Prompt Payload Size (KB)", min_value=0.01, value=1.2, format="%.2f")
     with col3:
-        duration_val = st.number_input("Duration (Seconds)", min_value=0.1, value=2.5)
+        duration_val = st.number_input("Active Processing Duration (Seconds)", min_value=0.1, value=2.5)
 
     submitted = st.form_submit_button("Record Telemetry & Simulate Run")
 
@@ -69,7 +69,7 @@ with st.form("telemetry_form"):
             "session_id": session_id,
             "unit_type": unit_type,
             "count": count_val,
-            "prompt_length": prompt_len,
+            "prompt_size_kb": prompt_size_kb,
             "duration_seconds": duration_val
         }
         save_log_record(new_record)
@@ -88,7 +88,6 @@ if logs_data:
     # 🛠️ Batch Controls & Reporting (4 Buttons aligned to the right)
     st.markdown("### 🛠️ Batch Controls & Reporting")
     
-    # Using 5 columns to push the 4 action buttons to the right
     _, col_btn1, col_btn2, col_btn3, col_btn4 = st.columns([2, 1, 1, 1, 1])
 
     with col_btn1:
@@ -116,7 +115,6 @@ if logs_data:
                     st.rerun()
 
     with col_btn3:
-        # Download template for mass uploading matching exact schema
         template_output = io.BytesIO()
         with pd.ExcelWriter(template_output, engine="openpyxl") as writer:
             sample_template_df = pd.DataFrame([{
@@ -126,7 +124,7 @@ if logs_data:
                 "session_id": "daesg_session_01",
                 "unit_type": "tokens",
                 "count": 1500,
-                "prompt_length": 120,
+                "prompt_size_kb": 1.2,
                 "duration_seconds": 2.5
             }])
             sample_template_df.to_excel(writer, sheet_name="Mass_Upload_Template", index=False)
@@ -139,23 +137,23 @@ if logs_data:
         )
 
     with col_btn4:
-        # Multi-tab Excel Compliance Report matching template structure
         output = io.BytesIO()
         with pd.ExcelWriter(output, engine="openpyxl") as writer:
-            # Sheet 1: BillingData
-            billing_df = df_logs[["session_id", "unit_type", "count"]] if all(k in df_logs.columns for k in ["session_id", "unit_type", "count"]) else df_logs
+            # Sheet 1: BillingData (Retaining Client Name & Account ID for financial reconciliation)
+            billing_cols = [c for c in ["client_name", "account_id", "session_id", "unit_type", "count"] if c in df_logs.columns]
+            billing_df = df_logs[billing_cols] if billing_cols else df_logs
             billing_df.to_excel(writer, sheet_name="BillingData", index=False)
             
-            # Sheet 2: UsageTokensTime
-            usage_cols = [c for c in ["timestamp", "session_id", "unit_type", "count", "duration_seconds"] if c in df_logs.columns]
+            # Sheet 2: UsageTokensTime (Aggregate usage telemetry with prompt_size_kb)
+            usage_cols = [c for c in ["timestamp", "session_id", "unit_type", "count", "prompt_size_kb", "duration_seconds"] if c in df_logs.columns]
             usage_df = df_logs[usage_cols] if usage_cols else df_logs
             usage_df.to_excel(writer, sheet_name="UsageTokensTime", index=False)
             
-            # Sheet 3: SamplingData (10% global sample with safe per-account sizing to prevent error)
+            # Sheet 3: SamplingData (Strictly unlinked - Account ID & Client Name excluded)
             try:
                 if "account_id" in df_logs.columns and len(df_logs) > 0:
                     def safe_sample(group):
-                        n = max(1, int(len(group) * 0.005)) # <1% per account cap
+                        n = max(1, int(len(group) * 0.005))
                         return group.sample(n=min(n, len(group)), random_state=42)
                     sampled_df = df_logs.groupby("account_id", group_keys=False).apply(safe_sample)
                 else:
@@ -163,7 +161,7 @@ if logs_data:
             except Exception:
                 sampled_df = df_logs.head(max(1, int(len(df_logs) * 0.1)))
             
-            sampling_cols = [c for c in ["session_id", "prompt_length", "duration_seconds"] if c in sampled_df.columns]
+            sampling_cols = [c for c in ["session_id", "prompt_size_kb", "duration_seconds"] if c in sampled_df.columns]
             sampling_output_df = sampled_df[sampling_cols] if sampling_cols else sampled_df
             sampling_output_df.to_excel(writer, sheet_name="SamplingData", index=False)
 
