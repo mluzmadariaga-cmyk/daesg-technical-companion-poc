@@ -1,0 +1,11 @@
+version: '3.8'
+services:
+  daesg-poc:
+    image: python:3.10-slim
+    working_dir: /app
+    volumes:
+      - daesg_persistent_storage:/app/data
+    command: tail -f /dev/null
+volumes:
+  daesg_persistent_storage:
+    name: daesg_permanent_logs
