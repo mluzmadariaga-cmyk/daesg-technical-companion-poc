@@ -96,84 +96,82 @@ with st.form("telemetry_form"):
             st.rerun()
 
 st.markdown("---")
-st.markdown("### Current Stored Audit Logs")
+
+# 🛠️ Batch Controls & Reporting (Always Visible so you can upload agent datasets immediately)
+st.markdown("### 🛠️ Batch Controls & Reporting")
 
 logs_data = load_audit_logs()
+_, col_btn1, col_btn2, col_btn3, col_btn4 = st.columns([2, 1, 1, 1, 1])
 
-if logs_data:
-    df_logs = pd.DataFrame(logs_data)
-    st.dataframe(df_logs, use_container_width=True)
+with col_btn1:
+    if st.button("🗑️ Delete All Logs", use_container_width=True):
+        if os.path.exists(LOG_FILE):
+            os.remove(LOG_FILE)
+            st.success("All logs cleared!")
+            st.rerun()
 
-    # 🛠️ Batch Controls & Reporting (4 Buttons aligned to the right)
-    st.markdown("### 🛠️ Batch Controls & Reporting")
-    
-    _, col_btn1, col_btn2, col_btn3, col_btn4 = st.columns([2, 1, 1, 1, 1])
-
-    with col_btn1:
-        if st.button("🗑️ Delete All Logs", use_container_width=True):
-            if os.path.exists(LOG_FILE):
-                os.remove(LOG_FILE)
-                st.success("All logs cleared!")
-                st.rerun()
-
-    with col_btn2:
-        with st.popover("📤 Mass Upload Template", use_container_width=True):
-            st.markdown("### Upload Batch Dataset")
-            mass_file = st.file_uploader("Choose Excel or CSV", type=["xlsx", "csv"], key="mass_file_main")
-            if mass_file is not None:
-                if mass_file.name.endswith('.xlsx'):
-                    mass_df = pd.read_excel(mass_file)
+with col_btn2:
+    with st.popover("📤 Mass Upload Template", use_container_width=True):
+        st.markdown("### Upload Batch Dataset")
+        mass_file = st.file_uploader("Choose Excel or CSV", type=["xlsx", "csv"], key="mass_file_main")
+        if mass_file is not None:
+            if mass_file.name.endswith('.xlsx'):
+                mass_df = pd.read_excel(mass_file)
+            else:
+                mass_df = pd.read_csv(mass_file)
+            st.write(f"Loaded {len(mass_df)} rows.")
+            if st.button("Confirm Mass Ingestion"):
+                existing_sessions = {r["session_id"] for r in logs_data}
+                duplicate_found = False
+                for _, row in mass_df.iterrows():
+                    if str(row.get("session_id")) in existing_sessions:
+                        duplicate_found = True
+                        break
+                
+                if duplicate_found:
+                    st.error("Batch upload contains duplicate Session IDs already present in audit logs. Ingestion aborted.")
                 else:
-                    mass_df = pd.read_csv(mass_file)
-                st.write(f"Loaded {len(mass_df)} rows.")
-                if st.button("Confirm Mass Ingestion"):
-                    existing_sessions = {r["session_id"] for r in logs_data}
-                    duplicate_found = False
-                    for _, row in mass_df.iterrows():
-                        if str(row.get("session_id")) in existing_sessions:
-                            duplicate_found = True
-                            break
-                    
-                    if duplicate_found:
-                        st.error("Batch upload contains duplicate Session IDs already present in audit logs. Ingestion aborted.")
-                    else:
-                        with open(LOG_FILE, "a") as f:
-                            for _, row in mass_df.iterrows():
-                                f.write(json.dumps(row.to_dict()) + "\n")
-                        st.success(f"Successfully imported {len(mass_df)} records!")
-                        st.rerun()
+                    with open(LOG_FILE, "a") as f:
+                        for _, row in mass_df.iterrows():
+                            # Ensure clean dictionary conversion handling NaNs if any
+                            clean_row = {k: v for k, v in row.to_dict().items() if pd.notna(v)}
+                            f.write(json.dumps(clean_row) + "\n")
+                    st.success(f"Successfully imported {len(mass_df)} records!")
+                    st.rerun()
 
-    with col_btn3:
-        template_output = io.BytesIO()
-        with pd.ExcelWriter(template_output, engine="openpyxl") as writer:
-            sample_template_df = pd.DataFrame([{
-                "timestamp": "2026-08-18T00:00:00.000000",
-                "client_name": "Client_Alpha",
-                "account_id": "Acc_001",
-                "session_id": "daesg_session_01",
-                "unit_type": "tokens",
-                "count": 1500,
-                "prompt_size_kb": 1.2,
-                "duration_seconds": 2.5
-            }])
-            sample_template_df.to_excel(writer, sheet_name="Mass_Upload_Template", index=False)
-        st.download_button(
-            label="📥 Download Template",
-            data=template_output.getvalue(),
-            file_name="DAESG_Mass_Upload_Template.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            use_container_width=True,
-        )
+with col_btn3:
+    template_output = io.BytesIO()
+    with pd.ExcelWriter(template_output, engine="openpyxl") as writer:
+        sample_template_df = pd.DataFrame([{
+            "timestamp": "2026-08-18T00:00:00.000000",
+            "client_name": "Client_Alpha",
+            "account_id": "Acc_001",
+            "session_id": "daesg_session_01",
+            "unit_type": "tokens",
+            "count": 1500,
+            "prompt_size_kb": 1.2,
+            "duration_seconds": 2.5
+        }])
+        sample_template_df.to_excel(writer, sheet_name="Mass_Upload_Template", index=False)
+    st.download_button(
+        label="📥 Download Template",
+        data=template_output.getvalue(),
+        file_name="DAESG_Mass_Upload_Template.xlsx",
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        use_container_width=True,
+    )
 
-    with col_btn4:
+with col_btn4:
+    if logs_data:
         output = io.BytesIO()
         with pd.ExcelWriter(output, engine="openpyxl") as writer:
-            # Sheet 1: BillingData (Client & Account traceability for financial reconciliation)
+            df_logs = pd.DataFrame(logs_data)
+            # Sheet 1: BillingData
             billing_cols = [c for c in ["client_name", "account_id", "session_id", "unit_type", "count"] if c in df_logs.columns]
             billing_df = df_logs[billing_cols] if billing_cols else df_logs
             billing_df.to_excel(writer, sheet_name="BillingData", index=False)
             
-            # Sheet 2: UsageTokensTime (Pure anonymized aggregate totals only: Tokens, Prompt KB, Duration)
+            # Sheet 2: UsageTokensTime
             usage_agg_df = pd.DataFrame([{
                 "total_tokens": df_logs["count"].sum() if "count" in df_logs.columns else 0,
                 "total_prompt_size_kb": df_logs["prompt_size_kb"].sum() if "prompt_size_kb" in df_logs.columns else 0.0,
@@ -182,9 +180,9 @@ if logs_data:
             }])
             usage_agg_df.to_excel(writer, sheet_name="UsageTokensTime", index=False)
             
-            # Sheet 3: PeriodAggregation (Pure privacy-preserving totals aggregated by date without any identifiers)
+            # Sheet 3: PeriodAggregation
             if "timestamp" in df_logs.columns:
-                df_logs["date"] = pd.to_datetime(df_logs["timestamp"]).dt.date
+                df_logs["date"] = pd.to_datetime(df_logs["timestamp"], errors="coerce").dt.date
                 period_agg_df = df_logs.groupby("date").agg({
                     "count": "sum",
                     "prompt_size_kb": "sum",
@@ -193,7 +191,7 @@ if logs_data:
                 }).rename(columns={"count": "total_tokens", "session_id": "total_sessions"}).reset_index()
                 period_agg_df.to_excel(writer, sheet_name="PeriodAggregation", index=False)
             
-            # Sheet 4: SamplingData (Strictly unlinked - Account ID & Client Name excluded, using prompt_size_kb)
+            # Sheet 4: SamplingData
             try:
                 if "account_id" in df_logs.columns and len(df_logs) > 0:
                     def safe_sample(group):
@@ -209,15 +207,21 @@ if logs_data:
             sampling_output_df = sampled_df[sampling_cols] if sampling_cols else sampled_df
             sampling_output_df.to_excel(writer, sheet_name="SamplingData", index=False)
 
-        processed_data = output.getvalue()
-
         st.download_button(
             label="📊 Export Report",
-            data=processed_data,
+            data=output.getvalue(),
             file_name="DAESG_Telemetry_Report.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             use_container_width=True,
         )
+    else:
+        st.button("📊 Export Report", disabled=True, use_container_width=True)
 
+st.markdown("---")
+st.markdown("### Current Stored Audit Logs")
+
+if logs_data:
+    df_logs = pd.DataFrame(logs_data)
+    st.dataframe(df_logs, use_container_width=True)
 else:
-    st.info("No audit logs found. Run an interaction above to generate telemetry data.")
+    st.info("No audit logs found. Run an interaction above or use '📤 Mass Upload Template' to ingest your agent dataset.")
